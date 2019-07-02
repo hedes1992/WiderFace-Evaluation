@@ -1,3 +1,4 @@
+#coding=utf-8
 """
 WiderFace evaluation code
 author: wondervictor
@@ -14,6 +15,7 @@ from scipy.io import loadmat
 from bbox import bbox_overlaps
 from IPython import embed
 
+import pdb
 
 def get_gt_boxes(gt_dir):
     """ gt dir: (wider_face_val.mat, wider_easy_val.mat, wider_medium_val.mat, wider_hard_val.mat)"""
@@ -102,6 +104,14 @@ def get_preds(pred_dir):
         current_event = dict()
         for imgtxt in event_images:
             imgname, _boxes = read_pred_file(os.path.join(event_dir, imgtxt))
+            # 需要排序, 从大到小
+            try:
+                if _boxes.shape[0] > 0:
+                    s_index         = np.argsort(-_boxes[:, 4])
+                    _boxes          = _boxes[s_index, :]
+            except IndexError:
+                pdb.set_trace()
+                pass
             current_event[imgname.rstrip('.jpg')] = _boxes
         boxes[event] = current_event
     return boxes
@@ -180,6 +190,7 @@ def img_pr_info(thresh_num, pred_info, proposal_list, pred_recall):
         else:
             r_index = r_index[-1]
             p_index = np.where(proposal_list[:r_index+1] == 1)[0]
+#            p_index = np.where(proposal_list[:r_index] == 1)[0]
             pr_info[t, 0] = len(p_index)
             pr_info[t, 1] = pred_recall[r_index]
     return pr_info
@@ -213,61 +224,72 @@ def voc_ap(rec, prec):
     return ap
 
 
-def evaluation(pred, gt_path, iou_thresh=0.5):
+def evaluation(pred, gt_path, iou_thresh_list=[0.5]):
     pred = get_preds(pred)
-    norm_score(pred)
+#    norm_score(pred)
     facebox_list, event_list, file_list, hard_gt_list, medium_gt_list, easy_gt_list = get_gt_boxes(gt_path)
     event_num = len(event_list)
     thresh_num = 1000
     settings = ['easy', 'medium', 'hard']
     setting_gts = [easy_gt_list, medium_gt_list, hard_gt_list]
-    aps = []
-    for setting_id in range(3):
-        # different setting
-        gt_list = setting_gts[setting_id]
-        count_face = 0
-        pr_curve = np.zeros((thresh_num, 2)).astype('float')
-        # [hard, medium, easy]
-        pbar = tqdm.tqdm(range(event_num))
-        for i in pbar:
-            pbar.set_description('Processing {}'.format(settings[setting_id]))
-            event_name = str(event_list[i][0][0])
-            img_list = file_list[i][0]
-            pred_list = pred[event_name]
-            sub_gt_list = gt_list[i][0]
-            # img_pr_info_list = np.zeros((len(img_list), thresh_num, 2))
-            gt_bbx_list = facebox_list[i][0]
+    aps_list = []
+    for iou_idx, iou_thresh in enumerate(iou_thresh_list):
+        print("{}/{}-th iou_thresh:{}".format(iou_idx, len(iou_thresh_list), iou_thresh))
+        aps = []
+        for setting_id in range(3):
+            # different setting
+            gt_list = setting_gts[setting_id]
+            count_face = 0
+            pr_curve = np.zeros((thresh_num, 2)).astype('float')
+            # [hard, medium, easy]
+            pbar = tqdm.tqdm(range(event_num))
+            for i in pbar:
+                pbar.set_description('Processing {}'.format(settings[setting_id]))
+                event_name = str(event_list[i][0][0])
+                img_list = file_list[i][0]
+                pred_list = pred[event_name]
+                sub_gt_list = gt_list[i][0]
+                # img_pr_info_list = np.zeros((len(img_list), thresh_num, 2))
+                gt_bbx_list = facebox_list[i][0]
 
-            for j in range(len(img_list)):
-                pred_info = pred_list[str(img_list[j][0][0])]
+                for j in range(len(img_list)):
+                    pred_info = pred_list[str(img_list[j][0][0])]
 
-                gt_boxes = gt_bbx_list[j][0].astype('float')
-                keep_index = sub_gt_list[j][0]
-                count_face += len(keep_index)
+                    gt_boxes = gt_bbx_list[j][0].astype('float')
+                    keep_index = sub_gt_list[j][0]
+                    count_face += len(keep_index)
 
-                if len(gt_boxes) == 0 or len(pred_info) == 0:
-                    continue
-                ignore = np.zeros(gt_boxes.shape[0])
-                if len(keep_index) != 0:
-                    ignore[keep_index-1] = 1
-                pred_recall, proposal_list = image_eval(pred_info, gt_boxes, ignore, iou_thresh)
+                    if len(gt_boxes) == 0 or len(pred_info) == 0:
+                        continue
+                    ignore = np.zeros(gt_boxes.shape[0])
+                    if len(keep_index) != 0:
+                        ignore[keep_index-1] = 1
+                    pred_recall, proposal_list = image_eval(pred_info, gt_boxes, ignore, iou_thresh)
 
-                _img_pr_info = img_pr_info(thresh_num, pred_info, proposal_list, pred_recall)
+                    _img_pr_info = img_pr_info(thresh_num, pred_info, proposal_list, pred_recall)
 
-                pr_curve += _img_pr_info
-        pr_curve = dataset_pr_info(thresh_num, pr_curve, count_face)
+                    pr_curve += _img_pr_info
+            pr_curve = dataset_pr_info(thresh_num, pr_curve, count_face)
 
-        propose = pr_curve[:, 0]
-        recall = pr_curve[:, 1]
+            propose = pr_curve[:, 0]
+            recall = pr_curve[:, 1]
 
-        ap = voc_ap(recall, propose)
-        aps.append(ap)
+            ap = voc_ap(recall, propose)
+            aps.append(ap)
 
-    print("==================== Results ====================")
-    print("Easy   Val AP: {}".format(aps[0]))
-    print("Medium Val AP: {}".format(aps[1]))
-    print("Hard   Val AP: {}".format(aps[2]))
-    print("=================================================")
+        print("==================== Results ====================")
+        print("Easy   Val AP: {}".format(aps[0]))
+        print("Medium Val AP: {}".format(aps[1]))
+        print("Hard   Val AP: {}".format(aps[2]))
+        print("=================================================")
+        aps_list.append(np.array(aps))
+    if len(aps_list) > 1:
+        mean_aps    = np.mean(np.stack(aps_list, axis=0), axis=0)
+        print("==================== Results ====================")
+        print("Mean Easy   Val AP: {}".format(mean_aps[0]))
+        print("Mean Medium Val AP: {}".format(mean_aps[1]))
+        print("Mean Hard   Val AP: {}".format(mean_aps[2]))
+        print("=================================================")
 
 
 if __name__ == '__main__':
@@ -275,18 +297,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--pred')
     parser.add_argument('-g', '--gt', default='/Users/Vic/Downloads/eval_tools/ground_truth/')
+    parser.add_argument('-e', '--eval_type', default='AP50')
 
     args = parser.parse_args()
-    evaluation(args.pred, args.gt)
-
-
-
-
-
-
-
-
-
-
-
-
+    if args.eval_type == 'AP50':
+        evaluation(args.pred, args.gt, iou_thresh_list=[0.5])
+    elif args.eval_type == 'mAP':
+        evaluation(args.pred, args.gt, iou_thresh_list=[0.05*ele for ele in range(10, 20)])
+    else:
+        assert False, "cannot work for eval_type:{}".format(args.eval_type)
