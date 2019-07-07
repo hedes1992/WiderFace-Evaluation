@@ -226,7 +226,7 @@ def voc_ap(rec, prec):
 
 def evaluation(pred, gt_path, iou_thresh_list=[0.5]):
     pred = get_preds(pred)
-#    norm_score(pred)
+    norm_score(pred)
     facebox_list, event_list, file_list, hard_gt_list, medium_gt_list, easy_gt_list = get_gt_boxes(gt_path)
     event_num = len(event_list)
     thresh_num = 1000
